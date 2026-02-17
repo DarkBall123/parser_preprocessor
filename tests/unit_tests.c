@@ -139,6 +139,75 @@ static int test_nested_conditionals(void) {
     return 0;
 }
 
+static int test_ifdef_with_trailing_line_comment(void) {
+    const char *input =
+        "#define FLAG\n"
+        "#ifdef FLAG // note\n"
+        "ok\n"
+        "#endif\n";
+    pp_result result;
+    pp_status_code status;
+
+    status = run_preprocess(input, NULL, &result);
+    ASSERT_EQ_INT(status, PP_STATUS_OK);
+    ASSERT_EQ_STR(result.out_text, "ok\n");
+
+    pp_result_dispose(&result);
+    return 0;
+}
+
+static int test_ifndef_with_trailing_block_comment(void) {
+    const char *input =
+        "#ifndef FLAG /* note */\n"
+        "ok\n"
+        "#endif\n";
+    pp_result result;
+    pp_status_code status;
+
+    status = run_preprocess(input, NULL, &result);
+    ASSERT_EQ_INT(status, PP_STATUS_OK);
+    ASSERT_EQ_STR(result.out_text, "ok\n");
+
+    pp_result_dispose(&result);
+    return 0;
+}
+
+static int test_undef_with_trailing_comment(void) {
+    const char *input =
+        "#define FLAG 1\n"
+        "#undef FLAG // note\n"
+        "#ifdef FLAG\n"
+        "bad\n"
+        "#endif\n";
+    pp_result result;
+    pp_status_code status;
+
+    status = run_preprocess(input, NULL, &result);
+    ASSERT_EQ_INT(status, PP_STATUS_OK);
+    ASSERT_EQ_STR(result.out_text, "");
+
+    pp_result_dispose(&result);
+    return 0;
+}
+
+static int test_else_and_endif_with_trailing_comments(void) {
+    const char *input =
+        "#ifdef FLAG\n"
+        "bad\n"
+        "#else // note\n"
+        "ok\n"
+        "#endif /* tail */\n";
+    pp_result result;
+    pp_status_code status;
+
+    status = run_preprocess(input, NULL, &result);
+    ASSERT_EQ_INT(status, PP_STATUS_OK);
+    ASSERT_EQ_STR(result.out_text, "ok\n");
+
+    pp_result_dispose(&result);
+    return 0;
+}
+
 static int test_macro_substitution_basic(void) {
     const char *input =
         "#define N 3\n"
@@ -149,6 +218,51 @@ static int test_macro_substitution_basic(void) {
     status = run_preprocess(input, NULL, &result);
     ASSERT_EQ_INT(status, PP_STATUS_OK);
     ASSERT_EQ_STR(result.out_text, "3\n");
+
+    pp_result_dispose(&result);
+    return 0;
+}
+
+static int test_define_ignores_trailing_line_comment(void) {
+    const char *input =
+        "#define X 1 // note\n"
+        "X+1\n";
+    pp_result result;
+    pp_status_code status;
+
+    status = run_preprocess(input, NULL, &result);
+    ASSERT_EQ_INT(status, PP_STATUS_OK);
+    ASSERT_EQ_STR(result.out_text, "1 +1\n");
+
+    pp_result_dispose(&result);
+    return 0;
+}
+
+static int test_define_ignores_trailing_block_comment(void) {
+    const char *input =
+        "#define X 1 /* note */\n"
+        "X+1\n";
+    pp_result result;
+    pp_status_code status;
+
+    status = run_preprocess(input, NULL, &result);
+    ASSERT_EQ_INT(status, PP_STATUS_OK);
+    ASSERT_EQ_STR(result.out_text, "1 +1\n");
+
+    pp_result_dispose(&result);
+    return 0;
+}
+
+static int test_define_keeps_comment_markers_inside_string(void) {
+    const char *input =
+        "#define S \"a // b\"\n"
+        "S\n";
+    pp_result result;
+    pp_status_code status;
+
+    status = run_preprocess(input, NULL, &result);
+    ASSERT_EQ_INT(status, PP_STATUS_OK);
+    ASSERT_EQ_STR(result.out_text, "\"a // b\"\n");
 
     pp_result_dispose(&result);
     return 0;
@@ -635,7 +749,14 @@ int main(void) {
         {"else_branch_when_macro_not_defined", test_else_branch_when_macro_not_defined},
         {"undef_removes_macro", test_undef_removes_macro},
         {"nested_conditionals", test_nested_conditionals},
+        {"ifdef_with_trailing_line_comment", test_ifdef_with_trailing_line_comment},
+        {"ifndef_with_trailing_block_comment", test_ifndef_with_trailing_block_comment},
+        {"undef_with_trailing_comment", test_undef_with_trailing_comment},
+        {"else_and_endif_with_trailing_comments", test_else_and_endif_with_trailing_comments},
         {"macro_substitution_basic", test_macro_substitution_basic},
+        {"define_ignores_trailing_line_comment", test_define_ignores_trailing_line_comment},
+        {"define_ignores_trailing_block_comment", test_define_ignores_trailing_block_comment},
+        {"define_keeps_comment_markers_inside_string", test_define_keeps_comment_markers_inside_string},
         {"macro_substitution_identifier_boundaries", test_macro_substitution_identifier_boundaries},
         {"macro_not_replaced_in_string_literal", test_macro_not_replaced_in_string_literal},
         {"macro_not_replaced_in_line_comment", test_macro_not_replaced_in_line_comment},

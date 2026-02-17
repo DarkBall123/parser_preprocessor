@@ -35,6 +35,69 @@ static int pp_has_non_space_tab(const char *source, size_t start, size_t end) {
     return 0;
 }
 
+static size_t pp_directive_args_end(const char *source, size_t start, size_t end) {
+    size_t pos = start;
+    int in_string = 0;
+
+    while (pos < end) {
+        char ch = source[pos];
+
+        if (in_string) {
+            if (ch == '\\' && pos + 1u < end) {
+                pos += 2u;
+                continue;
+            }
+
+            if (ch == '"') {
+                in_string = 0;
+            }
+            pos += 1u;
+            continue;
+        }
+
+        if (ch == '"') {
+            in_string = 1;
+            pos += 1u;
+            continue;
+        }
+
+        if (ch == '/' && pos + 1u < end) {
+            if (source[pos + 1u] == '/') {
+                return pos;
+            }
+
+            if (source[pos + 1u] == '*') {
+                size_t close = pos + 2u;
+                int found_close = 0;
+
+                while (close + 1u < end) {
+                    if (source[close] == '*' && source[close + 1u] == '/') {
+                        found_close = 1;
+                        close += 2u;
+                        break;
+                    }
+                    close += 1u;
+                }
+
+                if (!found_close) {
+                    return pos;
+                }
+
+                if (!pp_has_non_space_tab(source, close, end)) {
+                    return pos;
+                }
+
+                pos = close;
+                continue;
+            }
+        }
+
+        pos += 1u;
+    }
+
+    return end;
+}
+
 static int pp_keyword_eq(const char *source, size_t start, size_t len, const char *kw) {
     size_t kw_len = strlen(kw);
 
@@ -396,6 +459,7 @@ static pp_status_code pp_process_directive(
     size_t keyword_start;
     size_t keyword_len;
     size_t args_start;
+    size_t args_end;
 
     *emit_original_line = 0;
 
@@ -409,6 +473,7 @@ static pp_status_code pp_process_directive(
     keyword_len = cursor - keyword_start;
 
     args_start = pp_skip_space_tab(source, cursor, line_content_end);
+    args_end = pp_directive_args_end(source, args_start, line_content_end);
 
     if (keyword_len == 0u) {
         if (state->is_active && state->config->strict_mode) {
@@ -428,27 +493,27 @@ static pp_status_code pp_process_directive(
     }
 
     if (pp_keyword_eq(source, keyword_start, keyword_len, "define")) {
-        return pp_handle_define(state, source, args_start, line_content_end, line, line_start, diag);
+        return pp_handle_define(state, source, args_start, args_end, line, line_start, diag);
     }
 
     if (pp_keyword_eq(source, keyword_start, keyword_len, "undef")) {
-        return pp_handle_undef(state, source, args_start, line_content_end, line, line_start, diag);
+        return pp_handle_undef(state, source, args_start, args_end, line, line_start, diag);
     }
 
     if (pp_keyword_eq(source, keyword_start, keyword_len, "ifdef")) {
-        return pp_handle_if_directive(state, source, args_start, line_content_end, 0, line, line_start, diag);
+        return pp_handle_if_directive(state, source, args_start, args_end, 0, line, line_start, diag);
     }
 
     if (pp_keyword_eq(source, keyword_start, keyword_len, "ifndef")) {
-        return pp_handle_if_directive(state, source, args_start, line_content_end, 1, line, line_start, diag);
+        return pp_handle_if_directive(state, source, args_start, args_end, 1, line, line_start, diag);
     }
 
     if (pp_keyword_eq(source, keyword_start, keyword_len, "else")) {
-        return pp_handle_else(state, source, args_start, line_content_end, line, line_start, diag);
+        return pp_handle_else(state, source, args_start, args_end, line, line_start, diag);
     }
 
     if (pp_keyword_eq(source, keyword_start, keyword_len, "endif")) {
-        return pp_handle_endif(state, source, args_start, line_content_end, line, line_start, diag);
+        return pp_handle_endif(state, source, args_start, args_end, line, line_start, diag);
     }
 
     if (pp_keyword_eq(source, keyword_start, keyword_len, "include")) {
