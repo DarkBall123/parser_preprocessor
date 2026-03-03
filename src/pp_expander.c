@@ -1,16 +1,6 @@
 #include "pp_expander.h"
 
-#include <string.h>
-
-static int pp_is_ident_start(char ch) {
-    return (ch >= 'A' && ch <= 'Z') ||
-        (ch >= 'a' && ch <= 'z') ||
-        ch == '_';
-}
-
-static int pp_is_ident_char(char ch) {
-    return pp_is_ident_start(ch) || (ch >= '0' && ch <= '9');
-}
+#include "pp_text.h"
 
 static pp_status_code pp_set_error(
     pp_diagnostic *diag,
@@ -22,7 +12,88 @@ static pp_status_code pp_set_error(
     if (pp_diag_set(diag, code, line, column, message) == PP_STATUS_ALLOC_FAILED) {
         return PP_STATUS_ALLOC_FAILED;
     }
+
     return code;
+}
+
+static pp_status_code pp_append_range(
+    pp_buffer *out,
+    const char *source,
+    size_t start,
+    size_t end
+) {
+    return pp_buffer_append_n(out, source + start, end - start);
+}
+
+static size_t pp_find_string_end(const char *source, size_t start, size_t end) {
+    size_t pos = start + 1u;
+
+    while (pos < end) {
+        if (source[pos] == '\\' && pos + 1u < end) {
+            pos += 2u;
+            continue;
+        }
+
+        if (source[pos] == '"') {
+            pos += 1u;
+            break;
+        }
+
+        pos += 1u;
+    }
+
+    return pos;
+}
+
+static size_t pp_find_identifier_end(const char *source, size_t start, size_t end) {
+    size_t pos = start + 1u;
+
+    while (pos < end && pp_is_ident_char(source[pos])) {
+        pos += 1u;
+    }
+
+    return pos;
+}
+
+static pp_status_code pp_copy_in_block_comment(
+    pp_expand_state *state,
+    const char *source,
+    size_t content_end,
+    pp_buffer *out,
+    size_t *pos
+) {
+    size_t close = *pos;
+    int found_close = 0;
+
+    while (close + 1u < content_end) {
+        if (source[close] == '*' && source[close + 1u] == '/') {
+            close += 2u;
+            found_close = 1;
+            break;
+        }
+        close += 1u;
+    }
+
+    if (!found_close) {
+        pp_status_code status = pp_append_range(out, source, *pos, content_end);
+        if (status != PP_STATUS_OK) {
+            return status;
+        }
+
+        *pos = content_end;
+        return PP_STATUS_OK;
+    }
+
+    {
+        pp_status_code status = pp_append_range(out, source, *pos, close);
+        if (status != PP_STATUS_OK) {
+            return status;
+        }
+    }
+
+    *pos = close;
+    state->in_block_comment = 0;
+    return PP_STATUS_OK;
 }
 
 void pp_expand_state_init(pp_expand_state *state) {
@@ -57,80 +128,46 @@ pp_status_code pp_expand_active_line(
         pp_status_code status;
 
         if (state->in_block_comment) {
-            size_t close_pos = pos;
-            int found = 0;
-
-            while (close_pos + 1u < content_end) {
-                if (source[close_pos] == '*' && source[close_pos + 1u] == '/') {
-                    found = 1;
-                    close_pos += 2u;
-                    break;
-                }
-                close_pos += 1u;
-            }
-
-            if (!found) {
-                status = pp_buffer_append_n(out, source + pos, content_end - pos);
-                if (status != PP_STATUS_OK) {
-                    return status;
-                }
-                pos = content_end;
-            } else {
-                status = pp_buffer_append_n(out, source + pos, close_pos - pos);
-                if (status != PP_STATUS_OK) {
-                    return status;
-                }
-                pos = close_pos;
-                state->in_block_comment = 0;
+            status = pp_copy_in_block_comment(state, source, content_end, out, &pos);
+            if (status != PP_STATUS_OK) {
+                return status;
             }
             continue;
         }
 
         if (source[pos] == '"') {
-            size_t end = pos + 1u;
-
-            while (end < content_end) {
-                if (source[end] == '\\' && end + 1u < content_end) {
-                    end += 2u;
-                    continue;
-                }
-
-                if (source[end] == '"') {
-                    end += 1u;
-                    break;
-                }
-
-                end += 1u;
-            }
-
-            status = pp_buffer_append_n(out, source + pos, end - pos);
+            size_t string_end = pp_find_string_end(source, pos, content_end);
+            status = pp_append_range(out, source, pos, string_end);
             if (status != PP_STATUS_OK) {
                 return status;
             }
-            pos = end;
+
+            pos = string_end;
             continue;
         }
 
         if (source[pos] == '/' && pos + 1u < content_end && source[pos + 1u] == '/') {
-            status = pp_buffer_append_n(out, source + pos, content_end - pos);
+            status = pp_append_range(out, source, pos, content_end);
             if (status != PP_STATUS_OK) {
                 return status;
             }
+
             pos = content_end;
             continue;
         }
 
-        if (source[pos] == '/' && pos + 1u < content_end && source[pos + 1u] == '*' && config->support_block_comments) {
-            status = pp_buffer_append_n(out, source + pos, 2u);
-            if (status != PP_STATUS_OK) {
-                return status;
-            }
-            pos += 2u;
-            state->in_block_comment = 1;
-            continue;
-        }
+        if (source[pos] == '/' && pos + 1u < content_end && source[pos + 1u] == '*') {
+            if (config->support_block_comments) {
+                status = pp_append_range(out, source, pos, pos + 2u);
+                if (status != PP_STATUS_OK) {
+                    return status;
+                }
 
-        if (source[pos] == '/' && pos + 1u < content_end && source[pos + 1u] == '*' && !config->support_block_comments) {
+                pos += 2u;
+                state->in_block_comment = 1;
+                continue;
+            }
+
             if (config->strict_mode) {
                 return pp_set_error(
                     diag,
@@ -143,24 +180,17 @@ pp_status_code pp_expand_active_line(
         }
 
         if (pp_is_ident_start(source[pos])) {
-            size_t token_end = pos + 1u;
-            const pp_macro_entry *entry;
+            size_t token_end = pp_find_identifier_end(source, pos, content_end);
+            const pp_macro_entry *entry = pp_macro_table_find(macros, source + pos, token_end - pos);
 
-            while (token_end < content_end && pp_is_ident_char(source[token_end])) {
-                token_end += 1u;
-            }
-
-            entry = pp_macro_table_find(macros, source + pos, token_end - pos);
             if (entry != NULL) {
                 status = pp_buffer_append_n(out, entry->replacement, entry->replacement_len);
-                if (status != PP_STATUS_OK) {
-                    return status;
-                }
             } else {
-                status = pp_buffer_append_n(out, source + pos, token_end - pos);
-                if (status != PP_STATUS_OK) {
-                    return status;
-                }
+                status = pp_append_range(out, source, pos, token_end);
+            }
+
+            if (status != PP_STATUS_OK) {
+                return status;
             }
 
             pos = token_end;
@@ -171,11 +201,12 @@ pp_status_code pp_expand_active_line(
         if (status != PP_STATUS_OK) {
             return status;
         }
+
         pos += 1u;
     }
 
     if (line_out_end > content_end) {
-        return pp_buffer_append_n(out, source + content_end, line_out_end - content_end);
+        return pp_append_range(out, source, content_end, line_out_end);
     }
 
     return PP_STATUS_OK;
