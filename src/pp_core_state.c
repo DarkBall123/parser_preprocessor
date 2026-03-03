@@ -501,7 +501,7 @@ static pp_status_code pp_handle_endif(
 }
 
 static pp_status_code pp_handle_include(
-    pp_core_state *state,
+    const pp_core_state *state,
     const pp_line_span *line,
     const pp_directive_span *directive,
     pp_diagnostic *diag
@@ -532,7 +532,7 @@ static pp_status_code pp_handle_include(
 }
 
 static pp_status_code pp_handle_unknown_directive(
-    pp_core_state *state,
+    const pp_core_state *state,
     const pp_line_span *line,
     const pp_directive_span *directive,
     int *emit_original_line,
@@ -633,7 +633,6 @@ static pp_status_code pp_process_line(
     pp_diagnostic *diag
 ) {
     size_t cursor;
-    pp_status_code status;
 
     if (state->is_active && state->expand_state.in_block_comment) {
         return pp_expand_line(state, source, line, out, diag);
@@ -642,6 +641,7 @@ static pp_status_code pp_process_line(
     cursor = pp_skip_space_tab(source, line->start, line->content_end);
     if (cursor < line->content_end && source[cursor] == '#') {
         int emit_original_line;
+        pp_status_code status;
 
         status = pp_process_directive_line(state, source, line, cursor, &emit_original_line, diag);
         if (status != PP_STATUS_OK) {

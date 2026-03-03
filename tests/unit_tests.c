@@ -15,7 +15,7 @@
 #define ASSERT_EQ_SIZE(actual, expected) ASSERT_TRUE((actual) == (expected))
 #define ASSERT_EQ_STR(actual, expected) ASSERT_TRUE(strcmp((actual), (expected)) == 0)
 
-static int run_preprocess(const char *input, pp_config *config, pp_result *result) {
+static int run_preprocess(const char *input, const pp_config *config, pp_result *result) {
     return pp_preprocess(input, config, NULL, NULL, result);
 }
 
